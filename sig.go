@@ -40,6 +40,7 @@ type Log interface {
 	Error(error, ...Map)
 	Fatal(error, ...Map)
 	End()
+	Ctx() context.Context
 }
 
 func Setup(tracer otrace.Tracer, meter ometric.Meter, logger olog.Logger) {
@@ -82,6 +83,10 @@ func Start(ctx context.Context) Log {
 		global.logger.Emit(log.ctx, record)
 	}
 	return log
+}
+
+func (log *log) Ctx() context.Context {
+	return log.ctx
 }
 
 func (log *log) End() {
