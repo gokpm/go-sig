@@ -42,7 +42,7 @@ type Log interface {
 	End()
 }
 
-func Setup(tracer otrace.Tracer, meter ometric.Meter, logger olog.Logger) error {
+func Setup(tracer otrace.Tracer, meter ometric.Meter, logger olog.Logger) {
 	if tracer != nil {
 		global.ok.tracer = true
 		global.tracer = tracer
@@ -55,7 +55,6 @@ func Setup(tracer otrace.Tracer, meter ometric.Meter, logger olog.Logger) error 
 		global.ok.logger = true
 		global.logger = logger
 	}
-	return nil
 }
 
 func funcName() string {
