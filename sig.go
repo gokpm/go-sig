@@ -45,12 +45,15 @@ type Log interface {
 func Setup(tracer otrace.Tracer, meter ometric.Meter, logger olog.Logger) error {
 	if tracer != nil {
 		global.ok.tracer = true
+		global.tracer = tracer
 	}
 	if meter != nil {
 		global.ok.meter = true
+		global.meter = meter
 	}
 	if logger != nil {
 		global.ok.logger = true
+		global.logger = logger
 	}
 	return nil
 }
@@ -164,6 +167,9 @@ func (log *log) Error(err error, attributes ...Map) {
 	if !global.ok.tracer && !global.ok.logger {
 		return
 	}
+	if err == nil {
+		return
+	}
 	event := err.Error()
 	log.record(event, olog.SeverityError, attributes...)
 	if global.ok.tracer {
@@ -173,6 +179,9 @@ func (log *log) Error(err error, attributes ...Map) {
 
 func (log *log) Fatal(err error, attributes ...Map) {
 	if !global.ok.tracer && !global.ok.logger {
+		return
+	}
+	if err == nil {
 		return
 	}
 	event := err.Error()
