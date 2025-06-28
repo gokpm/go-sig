@@ -27,9 +27,10 @@ var global struct {
 type Map map[string]any
 
 type log struct {
-	name string
-	ctx  context.Context
-	span otrace.Span
+	function string
+	file     string
+	ctx      context.Context
+	span     otrace.Span
 }
 
 type Log interface {
@@ -58,12 +59,20 @@ func Setup(tracer otrace.Tracer, meter ometric.Meter, logger olog.Logger) {
 	}
 }
 
-func funcName() string {
-	pc, _, _, ok := runtime.Caller(2)
+func callerMeta() (string, string, int) {
+	pc, file, line, ok := runtime.Caller(2)
 	if !ok {
-		return ""
+		return "", "", 0
 	}
-	return runtime.FuncForPC(pc).Name()
+	return runtime.FuncForPC(pc).Name(), file, line
+}
+
+func callerLine(skip int) int {
+	_, _, line, ok := runtime.Caller(skip)
+	if !ok {
+		return 0
+	}
+	return line
 }
 
 func Start(ctx context.Context) Log {
@@ -71,15 +80,31 @@ func Start(ctx context.Context) Log {
 	if !global.ok.tracer && !global.ok.logger {
 		return log
 	}
-	log.name = funcName()
+	now := time.Now()
+	var line int
+	log.function, log.file, line = callerMeta()
 	if global.ok.tracer {
-		log.ctx, log.span = global.tracer.Start(ctx, log.name)
+		log.ctx, log.span = global.tracer.Start(
+			ctx,
+			log.function,
+			otrace.WithTimestamp(now),
+			otrace.WithAttributes(
+				attribute.String("file", log.file),
+				attribute.Int("line", line),
+			),
+		)
 	}
 	if global.ok.logger {
 		record := olog.Record{}
-		record.SetTimestamp(time.Now())
+		record.SetEventName("started")
+		record.SetTimestamp(now)
 		record.SetSeverity(olog.SeverityTrace)
-		record.SetBody(olog.StringValue(log.name + " started"))
+		record.SetSeverityText(olog.SeverityTrace.String())
+		record.AddAttributes(
+			olog.String("function", log.function),
+			olog.String("file", log.file),
+			olog.Int("line", line),
+		)
 		global.logger.Emit(log.ctx, record)
 	}
 	return log
@@ -93,19 +118,28 @@ func (log *log) End() {
 	if !global.ok.tracer && !global.ok.logger {
 		return
 	}
+	now := time.Now()
+	line := callerLine(2)
 	if global.ok.logger {
 		record := olog.Record{}
-		record.SetTimestamp(time.Now())
+		record.SetEventName("ended")
+		record.SetTimestamp(now)
 		record.SetSeverity(olog.SeverityTrace)
-		record.SetBody(olog.StringValue(log.name + " ended"))
+		record.SetSeverityText(olog.SeverityTrace.String())
+		record.AddAttributes(
+			olog.String("function", log.function),
+			olog.String("file", log.file),
+			olog.Int("line", line),
+		)
 		global.logger.Emit(log.ctx, record)
 	}
 	if global.ok.tracer {
-		log.span.End()
+		log.span.End(otrace.WithTimestamp(now))
 	}
 }
 
 func (log *log) record(event string, level olog.Severity, attrsSlice ...Map) {
+	now := time.Now()
 	var otraceAttrs []attribute.KeyValue
 	var ologAttrs []olog.KeyValue
 	if global.ok.tracer {
@@ -126,21 +160,45 @@ func (log *log) record(event string, level olog.Severity, attrsSlice ...Map) {
 			}
 		}
 	}
+	line := callerLine(3)
 	if global.ok.tracer {
-		log.span.AddEvent(event, otrace.WithAttributes(otraceAttrs...))
+		otraceAttrs = append(
+			otraceAttrs,
+			attribute.String("file", log.file),
+			attribute.Int("line", line),
+		)
+		options := []otrace.EventOption{
+			otrace.WithTimestamp(now),
+			otrace.WithAttributes(otraceAttrs...),
+		}
+		if level >= olog.SeverityError {
+			options = append(options, otrace.WithStackTrace(true))
+			log.span.AddEvent(event, options...)
+			log.span.SetStatus(codes.Error, event)
+		} else {
+			log.span.AddEvent(event, options...)
+		}
 	}
 	if global.ok.logger {
 		record := olog.Record{}
-		record.SetTimestamp(time.Now())
+		record.SetEventName(event)
+		record.SetTimestamp(now)
 		record.SetSeverity(level)
-		record.SetBody(olog.StringValue(event))
-		record.AddAttributes(ologAttrs...)
+		record.SetSeverityText(level.String())
+		record.AddAttributes(
+			olog.String("function", log.function),
+			olog.String("file", log.file),
+			olog.Int("line", line),
+		)
 		global.logger.Emit(log.ctx, record)
 	}
 }
 
 func (log *log) Trace(event string, attributes ...Map) {
 	if !global.ok.tracer && !global.ok.logger {
+		return
+	}
+	if event == "" {
 		return
 	}
 	log.record(event, olog.SeverityTrace, attributes...)
@@ -150,6 +208,9 @@ func (log *log) Info(event string, attributes ...Map) {
 	if !global.ok.tracer && !global.ok.logger {
 		return
 	}
+	if event == "" {
+		return
+	}
 	log.record(event, olog.SeverityInfo, attributes...)
 }
 
@@ -157,11 +218,17 @@ func (log *log) Debug(event string, attributes ...Map) {
 	if !global.ok.tracer && !global.ok.logger {
 		return
 	}
+	if event == "" {
+		return
+	}
 	log.record(event, olog.SeverityDebug, attributes...)
 }
 
 func (log *log) Warn(event string, attributes ...Map) {
 	if !global.ok.tracer && !global.ok.logger {
+		return
+	}
+	if event == "" {
 		return
 	}
 	log.record(event, olog.SeverityWarn, attributes...)
@@ -174,11 +241,7 @@ func (log *log) Error(err error, attributes ...Map) {
 	if err == nil {
 		return
 	}
-	event := err.Error()
-	log.record(event, olog.SeverityError, attributes...)
-	if global.ok.tracer {
-		log.span.SetStatus(codes.Error, event)
-	}
+	log.record(err.Error(), olog.SeverityError, attributes...)
 }
 
 func (log *log) Fatal(err error, attributes ...Map) {
@@ -188,9 +251,5 @@ func (log *log) Fatal(err error, attributes ...Map) {
 	if err == nil {
 		return
 	}
-	event := err.Error()
-	log.record(event, olog.SeverityFatal, attributes...)
-	if global.ok.tracer {
-		log.span.SetStatus(codes.Error, event)
-	}
+	log.record(err.Error(), olog.SeverityFatal, attributes...)
 }
