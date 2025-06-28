@@ -96,7 +96,7 @@ func Start(ctx context.Context) Log {
 	}
 	if global.ok.logger {
 		record := olog.Record{}
-		record.SetEventName("started")
+		record.SetBody(olog.StringValue("started"))
 		record.SetTimestamp(now)
 		record.SetSeverity(olog.SeverityTrace)
 		record.SetSeverityText(olog.SeverityTrace.String())
@@ -122,7 +122,7 @@ func (log *log) End() {
 	line := callerLine(2)
 	if global.ok.logger {
 		record := olog.Record{}
-		record.SetEventName("ended")
+		record.SetBody(olog.StringValue("ended"))
 		record.SetTimestamp(now)
 		record.SetSeverity(olog.SeverityTrace)
 		record.SetSeverityText(olog.SeverityTrace.String())
@@ -181,7 +181,7 @@ func (log *log) record(event string, level olog.Severity, attrsSlice ...Map) {
 	}
 	if global.ok.logger {
 		record := olog.Record{}
-		record.SetEventName(event)
+		record.SetBody(olog.StringValue(event))
 		record.SetTimestamp(now)
 		record.SetSeverity(level)
 		record.SetSeverityText(level.String())
