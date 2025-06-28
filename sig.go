@@ -172,7 +172,6 @@ func (log *log) record(event string, level olog.Severity, attrsSlice ...Map) {
 			otrace.WithAttributes(otraceAttrs...),
 		}
 		if level >= olog.SeverityError {
-			options = append(options, otrace.WithStackTrace(true))
 			log.span.AddEvent(event, options...)
 			log.span.SetStatus(codes.Error, event)
 		} else {
